@@ -1,0 +1,5 @@
+{
+  "name": "Cryptonews AI聚合中台",
+  "description": "一个由 AI 驱动的自动化加密货币新闻聚合器，使用 Gemini 2.5 Flash 和本地存储来获取、清洗、标记和存储行业新闻。",
+  "requestFramePermissions": []
+}
