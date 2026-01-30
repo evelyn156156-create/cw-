@@ -1,26 +1,31 @@
 {
-  "name": "cryptonews-ai聚合中台",
-  "private": true,
-  "version": "0.0.0",
+  "name": "crypto-intel-ai",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "@google/genai": "^1.38.0",
-    "lucide-react": "^0.563.0",
-    "recharts": "^3.7.0",
-    "dexie": "^4.2.1",
-    "dexie-react-hooks": "^4.2.0"
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "@google/genai": "^0.1.1",
+    "@supabase/supabase-js": "^2.39.3",
+    "lucide-react": "^0.300.0",
+    "recharts": "^2.10.0",
+    "dexie": "^3.2.4",
+    "dexie-react-hooks": "^1.1.7"
   },
   "devDependencies": {
-    "@types/node": "^22.14.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@types/node": "^20.10.5",
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.8",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.4.0"
   }
 }
