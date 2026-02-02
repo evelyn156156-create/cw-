@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { createClient } from '@supabase/supabase-js';
 
 // Vercel/Vite environment variables must start with VITE_ for client-side access
