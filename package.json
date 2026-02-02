@@ -13,9 +13,7 @@
     "@google/genai": "^0.1.1",
     "@supabase/supabase-js": "^2.39.3",
     "lucide-react": "^0.300.0",
-    "recharts": "^2.10.0",
-    "dexie": "^3.2.4",
-    "dexie-react-hooks": "^1.1.7"
+    "recharts": "^2.10.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NewsItem, RewriteTemplate } from '../types';
 import { rewriteNewsForCoinW } from '../services/geminiService';
-import { db } from '../db/database';
+import { supabase } from '../lib/supabase';
 import { X, Calendar, Globe, Tag, ExternalLink, ThumbsUp, ThumbsDown, Minus, Wand2, ShieldAlert, Check, Copy, RefreshCw, FileText, PenTool } from 'lucide-react';
 
 interface NewsDetailModalProps {
@@ -45,13 +45,21 @@ export const NewsDetailModal: React.FC<NewsDetailModalProps> = ({ item, isOpen, 
       try {
           const result = await rewriteNewsForCoinW(item, rewriteTemplate);
           setRewrittenData(result);
-          // Save to DB
-          await db.news.update(item.id!, {
-              rewrittenTitle: result.title,
-              rewrittenContent: result.content,
-              rewriteTemplate: rewriteTemplate
-          });
+          
+          // Save to Supabase
+          const { error } = await supabase
+              .from('news')
+              .update({
+                  rewrittenTitle: result.title,
+                  rewrittenContent: result.content,
+                  rewriteTemplate: rewriteTemplate
+              })
+              .eq('id', item.id);
+          
+          if (error) throw error;
+
       } catch (e) {
+          console.error(e);
           alert("改写失败，请重试");
       } finally {
           setIsRewriting(false);
@@ -67,12 +75,6 @@ export const NewsDetailModal: React.FC<NewsDetailModalProps> = ({ item, isOpen, 
     return new Date(ts).toLocaleString('zh-CN', {
       year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
     });
-  };
-
-  const getSentimentColor = (s?: string) => {
-    if (s === 'positive') return 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20';
-    if (s === 'negative') return 'text-red-400 bg-red-400/10 border-red-400/20';
-    return 'text-gray-400 bg-gray-400/10 border-gray-400/20';
   };
 
   return (

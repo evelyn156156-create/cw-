@@ -1,16 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { db, seedSources, pruneOldNews } from './db/database';
+import { supabase } from './lib/supabase';
+import { pruneOldNews } from './db/database';
 import { fetchRSS, testRSSConnection } from './services/rssService';
 import { analyzeNewsBatch } from './services/geminiService';
 import { NewsItem, SourceConfig, ProcessingStats, AnalysisStatus } from './types';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { 
     LayoutDashboard, 
     RefreshCw, 
     Database, 
     Settings, 
-    PlayCircle, 
-    Activity, 
     PieChart,
     Search,
     Trash2,
@@ -21,7 +19,6 @@ import {
     Power,
     CheckCircle2,
     Ban,
-    Hash,
     Clock,
     AlertCircle,
     Timer,
@@ -30,10 +27,9 @@ import {
     Loader2,
     Zap,
     BrainCircuit,
-    Wand2,
     Square,
-    Save,
-    HardDrive
+    HardDrive,
+    Activity
 } from 'lucide-react';
 import { StatsCard } from './components/StatsCard';
 import { NewsCard } from './components/NewsCard';
@@ -62,6 +58,14 @@ const TOPIC_FILTERS = [
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'sources' | 'data'>('dashboard');
   
+  // Data State
+  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
+  const [sources, setSources] = useState<SourceConfig[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
+
+  // Loading States
+  const [isLoadingData, setIsLoadingData] = useState(false);
+
   // State Separation: Fetching vs Analyzing
   const [isFetching, setIsFetching] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -102,31 +106,56 @@ const App: React.FC = () => {
   // Initialize from local storage
   const [lastRunTime, setLastRunTime] = useState<string | null>(localStorage.getItem('lastRunTime'));
 
-  // Live Queries
-  // Limit to recent 2000 items to prevent UI lag with massive history
-  const newsItems = useLiveQuery(
-    () => db.news
-      .orderBy('publishedAt')
-      .reverse()
-      .limit(2000) 
-      .toArray(),
-    []
-  );
+  // --- Supabase Data Loaders ---
+  const loadSources = async () => {
+      const { data } = await supabase.from('sources').select('*').order('id');
+      if (data) setSources(data as SourceConfig[]);
+  };
 
-  const pendingCount = useLiveQuery(() => db.news.where({status: AnalysisStatus.PENDING}).count()) || 0;
-  const sources = useLiveQuery(() => db.sources.toArray(), []);
-  const totalNewsCount = useLiveQuery(() => db.news.count()) || 0;
-  
-  // Initialize DB Seeds & Retention Policy
+  const loadNews = async () => {
+      setIsLoadingData(true);
+      // Fetch recent 2000 items to keep UI fast
+      const { data } = await supabase
+          .from('news')
+          .select('*')
+          .order('publishedAt', { ascending: false })
+          .limit(2000);
+      
+      if (data) {
+          setNewsItems(data as NewsItem[]);
+          setPendingCount(data.filter((i: any) => i.status === AnalysisStatus.PENDING).length);
+      }
+      setIsLoadingData(false);
+  };
+
   useEffect(() => {
-    seedSources();
-    
-    // Auto-cleanup on app start
+      loadSources();
+      loadNews();
+
+      // Simple Realtime Subscription for News Updates
+      const channel = supabase.channel('table-db-changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'news' },
+          (payload) => {
+             // Basic refresh on any change. For huge scale, optimise this to update specific rows.
+             // For now, debounced refresh or just simple refresh is okay for a team tool.
+             loadNews();
+          }
+        )
+        .subscribe();
+      
+      return () => { supabase.removeChannel(channel); };
+  }, []);
+  
+  // Auto-cleanup on app start
+  useEffect(() => {
     const performCleanup = async () => {
         if (retentionDays > 0) {
             const deleted = await pruneOldNews(retentionDays);
             if (deleted > 0) {
                 addLog(`🧹 系统维护: 自动清理了 ${deleted} 篇超过 ${retentionDays} 天的历史新闻`);
+                loadNews(); // Refresh
             }
         }
     };
@@ -143,10 +172,11 @@ const App: React.FC = () => {
   };
 
   const clearDatabase = async () => {
-      if(window.confirm("⚠️ 高危操作：确定要清空所有抓取的新闻数据吗？\n\n这将无法恢复。信源配置将保留。")) {
-          await db.news.clear();
+      if(window.confirm("⚠️ 高危操作：确定要清空所有抓取的新闻数据吗？\n\n信源配置将保留。")) {
+          await supabase.from('news').delete().neq('id', 0); // Delete all
           localStorage.removeItem('lastRunTime'); 
           setLastRunTime(null);
+          loadNews();
           addLog("数据库已完全清空。");
       }
   };
@@ -156,6 +186,7 @@ const App: React.FC = () => {
       if (window.confirm(`确定要立即删除 ${retentionDays} 天前的所有旧新闻吗？`)) {
           const count = await pruneOldNews(retentionDays);
           addLog(`手动清理完成: 已删除 ${count} 篇旧新闻。`);
+          loadNews();
       }
   };
 
@@ -163,7 +194,7 @@ const App: React.FC = () => {
   const handleFastFetch = async () => {
     if (isFetching) return;
     setIsFetching(true);
-    addLog("🚀 启动快速采集引擎...");
+    addLog("🚀 启动云端采集引擎...");
 
     const now = Date.now();
     const oneDay = 24 * 60 * 60 * 1000;
@@ -177,16 +208,20 @@ const App: React.FC = () => {
     }
 
     try {
-      const activeSources = await db.sources.filter(s => s.enabled).toArray();
+      const activeSources = sources.filter(s => s.enabled);
       let totalNewItems = 0;
 
-      // Parallel Fetch requests for speed (limited concurrency could be added if needed, but browser handles ~6 ok)
+      // Parallel Fetch requests
       const fetchPromises = activeSources.map(async (source) => {
           try {
               const fetched = await fetchRSS(source.url, source.name);
               
               if (fetched.length > 0) {
-                  await db.sources.update(source.id, { lastFetchStatus: 'ok', lastCheckTime: Date.now(), lastErrorMessage: undefined });
+                  await supabase.from('sources').update({ 
+                      lastFetchStatus: 'ok', 
+                      lastCheckTime: Date.now(), 
+                      lastErrorMessage: null 
+                  }).eq('id', source.id);
               }
 
               const newItems: NewsItem[] = [];
@@ -196,39 +231,46 @@ const App: React.FC = () => {
 
                   if (cutoffTime > 0 && itemTime < cutoffTime) continue;
 
-                  // Double check existence (optimization: could load all hashes in memory first for massive DBs)
-                  const exists = await db.news.get({ uniqueHash: item.uniqueHash });
-                  if (!exists) {
-                      newItems.push({
-                          ...(item as NewsItem),
-                          status: AnalysisStatus.PENDING, // IMPORTANT: Mark as Pending
-                          fetchedAt: Date.now()
-                      });
-                  }
+                  // Supabase Upsert handles "Check existence" automatically via unique constraint on uniqueHash
+                  newItems.push({
+                      ...(item as NewsItem),
+                      status: AnalysisStatus.PENDING,
+                      fetchedAt: Date.now()
+                  });
               }
 
               if (newItems.length > 0) {
-                  await db.news.bulkPut(newItems);
-                  totalNewItems += newItems.length;
-                  addLog(` -> ${source.name}: +${newItems.length} 篇新文`);
+                  const { error } = await supabase.from('news').upsert(newItems, { onConflict: 'uniqueHash', ignoreDuplicates: true });
+                  
+                  if (!error) {
+                      // Note: Upsert with ignoreDuplicates doesn't tell us exactly how many *new* rows were inserted vs ignored.
+                      // We approximate for logs.
+                      addLog(` -> ${source.name}: 抓取 ${newItems.length} 条 (含重复)`);
+                      totalNewItems += newItems.length; // Approximate
+                  } else {
+                      console.error("Supabase upsert error", error);
+                  }
               }
           } catch (e) {
               console.error(`Fetch error for ${source.name}`, e);
               addLog(` -> ${source.name}: 抓取失败`);
+              await supabase.from('sources').update({
+                  lastFetchStatus: 'error',
+                  lastErrorMessage: String(e),
+                  lastCheckTime: Date.now()
+              }).eq('id', source.id);
           }
       });
 
       await Promise.all(fetchPromises);
 
-      if (totalNewItems > 0) {
-          addLog(`✅ 采集完成！共新增 ${totalNewItems} 篇。`);
-      } else {
-          addLog(`⚠️ 采集完成，未发现新内容。`);
-      }
-
+      addLog(`✅ 采集完成！`);
+      
       const finishedTime = Date.now().toString();
       localStorage.setItem('lastRunTime', finishedTime);
       setLastRunTime(finishedTime);
+      loadNews(); // Refresh data
+      loadSources(); // Refresh status
 
     } catch (error) {
       addLog(`❌ 采集错误: ${error}`);
@@ -246,13 +288,16 @@ const App: React.FC = () => {
   };
 
   const runBatchAnalysis = async () => {
-      // Toggle logic handled by UI, here we assume start
+      // Toggle logic handled by UI
       if (isAnalyzing) {
           stopBatchAnalysis();
           return;
       }
       
-      const totalPending = await db.news.where({ status: AnalysisStatus.PENDING }).count();
+      // Fetch fresh pending count from DB
+      const { count } = await supabase.from('news').select('*', { count: 'exact', head: true }).eq('status', AnalysisStatus.PENDING);
+      const totalPending = count || 0;
+
       if (totalPending === 0) {
           addLog("没有待分析的文章。请先点击“开始采集”。");
           return;
@@ -264,7 +309,7 @@ const App: React.FC = () => {
       
       addLog(`🧠 启动 AI 批量分析 (队列: ${totalPending} 篇)`);
 
-      const BATCH_SIZE = 3; // Small batch to keep UI responsive
+      const BATCH_SIZE = 3; 
       
       try {
           while (true) {
@@ -273,30 +318,32 @@ const App: React.FC = () => {
                    break;
               }
 
-              // 1. Get next batch of Pending items
-              const batch = await db.news
-                  .where({ status: AnalysisStatus.PENDING })
-                  .reverse() // Newest first
-                  .limit(BATCH_SIZE)
-                  .toArray();
+              // 1. Get next batch of Pending items from Supabase
+              const { data: batch } = await supabase
+                  .from('news')
+                  .select('*')
+                  .eq('status', AnalysisStatus.PENDING)
+                  .order('publishedAt', { ascending: false })
+                  .limit(BATCH_SIZE);
 
-              if (batch.length === 0) {
+              if (!batch || batch.length === 0) {
                   break; // Queue empty
               }
 
               // 2. Analyze
-              const analyzedBatch = await analyzeNewsBatch(batch);
+              const analyzedBatch = await analyzeNewsBatch(batch as NewsItem[]);
 
-              // 3. Save updates
-              await db.transaction('rw', db.news, async () => {
-                  for (const item of analyzedBatch) {
-                      await db.news.put(item);
-                  }
-              });
+              // 3. Save updates to Supabase
+              for (const item of analyzedBatch) {
+                   await supabase.from('news').update(item).eq('id', item.id);
+              }
 
               // 4. Update Progress
-              const currentPending = await db.news.where({ status: AnalysisStatus.PENDING }).count();
-              setAnalysisProgress(prev => ({ ...prev, remaining: currentPending }));
+              const { count: currentPending } = await supabase.from('news').select('*', { count: 'exact', head: true }).eq('status', AnalysisStatus.PENDING);
+              setAnalysisProgress(prev => ({ ...prev, remaining: currentPending || 0 }));
+              
+              // Refresh local list occasionally so UI updates
+              loadNews();
 
               // 5. Rate Limit / UI Yield
               await new Promise(r => setTimeout(r, 1000));
@@ -310,27 +357,30 @@ const App: React.FC = () => {
       } finally {
           setIsAnalyzing(false);
           abortAnalysisRef.current = false;
+          loadNews();
       }
   };
 
   const handleSingleAnalysis = async (item: NewsItem) => {
       addLog(`🧠 单篇分析: ${item.title.substring(0, 15)}...`);
       try {
-          // 1. Set status to PROCESSING for UI feedback
-          await db.news.update(item.id!, { status: AnalysisStatus.PROCESSING });
+          // 1. Set status to PROCESSING
+          setNewsItems(prev => prev.map(n => n.id === item.id ? { ...n, status: AnalysisStatus.PROCESSING } : n));
           
           // 2. Analyze
           const results = await analyzeNewsBatch([item]);
           
           // 3. Save result
           if (results && results.length > 0) {
-              await db.news.put(results[0]);
+              await supabase.from('news').update(results[0]).eq('id', item.id);
               addLog(`✅ 分析完成`);
+              loadNews();
           }
       } catch (e) {
           // Revert or set to failed
-          await db.news.update(item.id!, { status: AnalysisStatus.FAILED });
+          await supabase.from('news').update({ status: AnalysisStatus.FAILED }).eq('id', item.id);
           addLog(`❌ 分析失败`);
+          loadNews();
       }
   };
 
@@ -376,17 +426,21 @@ const App: React.FC = () => {
               }
           }
 
-          await db.sources.add({
+          const { error } = await supabase.from('sources').insert({
               name: newSource.name,
               url: newSource.url,
               enabled: true,
               type: 'rss',
               lastFetchStatus: testResult.success ? 'ok' : 'error',
-              lastErrorMessage: testResult.success ? undefined : testResult.message,
+              lastErrorMessage: testResult.success ? null : testResult.message,
               lastCheckTime: Date.now()
-          } as any); 
+          });
+
+          if (error) throw error;
+          
           setNewSource({ name: '', url: '' });
           addLog(testResult.success ? `已添加新信源 (连接成功)` : `已强制添加信源 (连接失败)`);
+          loadSources();
       } catch (error) {
           console.error(error);
           alert("添加失败，可能该 URL 已存在。");
@@ -395,8 +449,9 @@ const App: React.FC = () => {
 
   const handleToggleSource = async (source: SourceConfig) => {
       try {
-          await db.sources.update(source.id, { enabled: !source.enabled });
+          await supabase.from('sources').update({ enabled: !source.enabled }).eq('id', source.id);
           addLog(`${source.enabled ? '禁用' : '启用'}信源: ${source.name}`);
+          loadSources();
       } catch (error) {
           console.error("Failed to toggle source", error);
       }
@@ -405,8 +460,9 @@ const App: React.FC = () => {
   const handleDeleteSource = async (id: string) => {
       if (window.confirm("确定要删除这个信源吗？")) {
           try {
-            await db.sources.delete(id);
+            await supabase.from('sources').delete().eq('id', id);
             addLog("信源已删除");
+            loadSources();
           } catch (error) {
               console.error("Failed to delete", error);
           }
@@ -418,12 +474,14 @@ const App: React.FC = () => {
       addLog(`测试连接: ${source.name}...`);
       try {
           const result = await testRSSConnection(source.url);
-          await db.sources.update(source.id, {
+          await supabase.from('sources').update({
               lastFetchStatus: result.success ? 'ok' : 'error',
-              lastErrorMessage: result.success ? undefined : result.message,
+              lastErrorMessage: result.success ? null : result.message,
               lastCheckTime: Date.now()
-          });
+          }).eq('id', source.id);
+          
           addLog(`${source.name} 连接测试: ${result.success ? '成功 ✅' : '失败 ❌'}`);
+          loadSources();
       } catch (e) {
           console.error(e);
       } finally {
@@ -540,7 +598,7 @@ const App: React.FC = () => {
             <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-crypto-500 to-crypto-400">
                 CryptoIntel
             </h1>
-            <p className="text-xs text-gray-500 mt-1">AI 驱动的情报聚合系统</p>
+            <p className="text-xs text-gray-500 mt-1">云端协作版 (Supabase)</p>
         </div>
         
         <nav className="flex-1 p-4 space-y-2 flex md:block overflow-x-auto md:overflow-visible">
@@ -652,7 +710,7 @@ const App: React.FC = () => {
             <div className="space-y-6">
                 {/* Stats Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <StatsCard title="总收录文章" value={totalNewsCount} icon={Database} />
+                    <StatsCard title="总收录文章" value={newsItems.length} icon={Database} />
                     <StatsCard 
                         title="待处理分析" 
                         value={pendingCount} 
@@ -661,7 +719,7 @@ const App: React.FC = () => {
                         trend={pendingCount > 0 ? "请点击右上角开始处理" : "所有任务已完成"}
                     />
                     <StatsCard title="过滤垃圾" value={newsItems?.filter(n => n.status === AnalysisStatus.SKIPPED).length || 0} icon={Settings} color="text-yellow-400" />
-                    <StatsCard title="活跃源" value={sources?.length || 0} icon={LayoutDashboard} color="text-blue-400" />
+                    <StatsCard title="活跃源" value={sources?.filter(s=>s.enabled).length || 0} icon={LayoutDashboard} color="text-blue-400" />
                 </div>
                 
                 {/* Dashboard Charts */}
@@ -720,7 +778,8 @@ const App: React.FC = () => {
                                     </div>
                                 </div>
                             ))}
-                            {(!newsItems || newsItems.length === 0) && (
+                            {isLoadingData && <div className="text-center py-4 text-gray-500"><Loader2 className="animate-spin inline mr-2"/> 加载中...</div>}
+                            {(!newsItems || newsItems.length === 0) && !isLoadingData && (
                                 <div className="text-center text-gray-500 py-10">暂无数据。请点击右上角“开始采集”。</div>
                             )}
                          </div>
