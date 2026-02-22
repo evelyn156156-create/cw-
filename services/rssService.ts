@@ -231,7 +231,7 @@ export const fetchRSS = async (url: string, sourceName: string): Promise<Partial
 
           // 2. Extract Categories from RSS tags
           const rssCategories: string[] = [];
-          item.querySelectorAll("category").forEach(cat => {
+          Array.from(item.querySelectorAll("category")).forEach((cat: any) => {
               if (cat.textContent) rssCategories.push(cat.textContent.trim());
           });
 

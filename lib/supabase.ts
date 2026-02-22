@@ -28,12 +28,18 @@ const getEnvVar = (key: string): string => {
 const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
 const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
 
+// Debugging log for browser console
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn("⚠️ Supabase credentials missing. The app will load in demo mode but data fetching will fail. Please check your .env file or Vercel settings.");
+  console.group("⚠️ Application Config Warning");
+  console.warn("Supabase credentials are missing.");
+  console.warn("Expected VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+  console.warn("App is running in DEMO/OFFLINE mode. Network requests will fail.");
+  console.groupEnd();
+} else {
+  console.log("✅ Supabase Client Initialized");
 }
 
 // Use placeholders if missing to prevent 'supabaseUrl is required' crash during initialization
-// This prevents the White Screen of Death if env vars are not set yet.
 export const supabase = createClient(
     supabaseUrl || 'https://placeholder-project.supabase.co', 
     supabaseAnonKey || 'placeholder-key'

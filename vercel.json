@@ -4,5 +4,9 @@
       "path": "/api/cron",
       "schedule": "0 8 * * *"
     }
+  ],
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/((?!api/|assets/|favicon.ico|.*\\..*).*)", "destination": "/index.html" }
   ]
 }
