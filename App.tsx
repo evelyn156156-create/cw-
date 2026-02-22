@@ -55,6 +55,18 @@ const TOPIC_FILTERS = [
   { id: 'layer2', label: 'Layer 2', keywords: ['Layer2', 'L2', 'Rollup', 'Arbitrum', 'Optimism', 'Base', 'ZK'] },
 ];
 
+// Default Sources List
+const DEFAULT_SOURCES = [
+    { name: 'ChainFeeds', url: 'https://www.chainfeeds.xyz/rss' },
+    { name: 'BlockBeats', url: 'https://api.theblockbeats.news/v1/open-api/home-xml' },
+    { name: 'PANews', url: 'https://rss.panewslab.com/zh/tvsq/rss' },
+    { name: 'Cointelegraph', url: 'https://cointelegraph.com/rss' },
+    { name: 'CryptoPotato', url: 'https://cryptopotato.com/rss/' },
+    { name: 'CryptoSlate', url: 'https://cryptoslate.com/feed/' },
+    { name: 'CryptoBriefing', url: 'https://cryptobriefing.com/feed/' },
+    { name: 'Blockworks', url: 'https://blockworks.co/feed' }
+];
+
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'sources' | 'data'>('dashboard');
   
@@ -510,6 +522,45 @@ const App: React.FC = () => {
       addLog("批量测试完成。");
   };
 
+  const handleResetSources = async () => {
+      if (!window.confirm("这将添加默认的加密货币新闻源。如果源已存在，将跳过。\n\n确定要继续吗？")) return;
+      
+      addLog("正在初始化默认信源...");
+      let addedCount = 0;
+
+      for (const src of DEFAULT_SOURCES) {
+          // Check if exists by URL to avoid duplicates
+          const exists = sources.some(s => s.url === src.url);
+          if (!exists) {
+              try {
+                  // Test connection before adding
+                  addLog(`正在验证信源: ${src.name}...`);
+                  const testResult = await testRSSConnection(src.url);
+                  
+                  await supabase.from('sources').insert({
+                      name: src.name,
+                      url: src.url,
+                      enabled: true,
+                      type: 'rss',
+                      lastFetchStatus: testResult.success ? 'ok' : 'error',
+                      lastErrorMessage: testResult.success ? null : testResult.message,
+                      lastCheckTime: Date.now()
+                  });
+                  addedCount++;
+                  if (!testResult.success) {
+                      addLog(`⚠️ ${src.name} 添加成功但连接失败: ${testResult.message}`);
+                  }
+              } catch (e) {
+                  console.error(`Failed to add ${src.name}`, e);
+                  addLog(`❌ 添加 ${src.name} 失败: ${String(e)}`);
+              }
+          }
+      }
+      
+      addLog(`✅ 初始化完成: 新增 ${addedCount} 个信源。`);
+      loadSources();
+  };
+
   // Advanced Filtering Logic
   const filteredNews = useMemo(() => {
     if (!newsItems) return [];
@@ -702,6 +753,17 @@ const App: React.FC = () => {
                     <RefreshCw className={isFetching ? "animate-spin" : ""} size={20}/>
                     <span>{isFetching ? '正在采集...' : '开始采集 (RSS)'}</span>
                 </button>
+
+                {/* 1.5. INIT BUTTON (If no sources) */}
+                {sources.length === 0 && (
+                    <button 
+                        onClick={handleResetSources}
+                        className="flex items-center space-x-2 px-4 py-3 rounded-lg font-bold border border-emerald-600 bg-emerald-900/30 text-emerald-400 hover:bg-emerald-900/50 transition-all"
+                    >
+                        <Database size={20}/>
+                        <span>初始化信源</span>
+                    </button>
+                )}
 
                 {/* 2. ANALYZE BUTTON (Primary) */}
                 <button 
@@ -1044,6 +1106,15 @@ const App: React.FC = () => {
                     >
                         <Wifi size={24} className="mb-1 text-crypto-400"/>
                         <span className="text-xs font-bold">批量体检</span>
+                    </button>
+                    
+                    <button 
+                        onClick={handleResetSources}
+                        className="bg-crypto-800 border border-crypto-700 hover:bg-crypto-700 text-gray-300 rounded-lg px-6 flex flex-col items-center justify-center transition-all"
+                        title="一键添加默认源"
+                    >
+                        <Database size={24} className="mb-1 text-emerald-400"/>
+                        <span className="text-xs font-bold">初始化信源</span>
                     </button>
                  </div>
 
