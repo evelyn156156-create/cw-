@@ -2,12 +2,25 @@ import { SourceConfig, NewsItem } from '../types';
 
 const API_BASE = '/api';
 
+const handleResponse = async (res: Response, errorMsg: string) => {
+  if (!res.ok) {
+    let details = '';
+    try {
+      const data = await res.json();
+      details = data.error || data.message || JSON.stringify(data);
+    } catch (e) {
+      details = await res.text();
+    }
+    throw new Error(`${errorMsg} (${res.status}): ${details}`);
+  }
+  return res.json();
+};
+
 export const api = {
   // Sources
   getSources: async (): Promise<SourceConfig[]> => {
     const res = await fetch(`${API_BASE}/sources`);
-    if (!res.ok) throw new Error('Failed to fetch sources');
-    return res.json();
+    return handleResponse(res, 'Failed to fetch sources');
   },
 
   addSource: async (source: Partial<SourceConfig>) => {
@@ -16,17 +29,14 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(source),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to add source');
-    return data;
+    return handleResponse(res, 'Failed to add source');
   },
 
   deleteSource: async (id: string) => {
     const res = await fetch(`${API_BASE}/sources/${id}`, {
       method: 'DELETE',
     });
-    if (!res.ok) throw new Error('Failed to delete source');
-    return res.json();
+    return handleResponse(res, 'Failed to delete source');
   },
 
   toggleSource: async (id: string, enabled: boolean) => {
@@ -35,8 +45,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
     });
-    if (!res.ok) throw new Error('Failed to update source');
-    return res.json();
+    return handleResponse(res, 'Failed to update source');
   },
 
   testSource: async (url: string, id?: string) => {
@@ -45,28 +54,27 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, id }),
     });
-    return res.json();
+    return handleResponse(res, 'Failed to test source');
   },
 
   // News
   getNews: async (): Promise<NewsItem[]> => {
     const res = await fetch(`${API_BASE}/news`);
-    if (!res.ok) throw new Error('Failed to fetch news');
-    return res.json();
+    return handleResponse(res, 'Failed to fetch news');
   },
 
   fetchRSS: async () => {
     const res = await fetch(`${API_BASE}/fetch-rss`, {
       method: 'POST',
     });
-    return res.json();
+    return handleResponse(res, 'Failed to fetch RSS');
   },
 
   analyzeNews: async () => {
     const res = await fetch(`${API_BASE}/analyze`, {
       method: 'POST',
     });
-    return res.json();
+    return handleResponse(res, 'Failed to analyze news');
   },
   
   pruneNews: async (days: number) => {
@@ -75,7 +83,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ days }),
     });
-    return res.json();
+    return handleResponse(res, 'Failed to prune news');
   },
 
   updateNews: async (id: string | number, data: any) => {
@@ -84,7 +92,6 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error('Failed to update news');
-    return res.json();
+    return handleResponse(res, 'Failed to update news');
   }
 };

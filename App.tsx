@@ -115,7 +115,7 @@ const App: React.FC = () => {
           setSources(data || []);
       } catch (error) {
           console.error('Error loading sources:', error);
-          addLog('❌ 加载信源失败');
+          addLog(`❌ 加载信源失败: ${error instanceof Error ? error.message : String(error)}`);
       }
   }, [addLog]);
 
@@ -130,7 +130,7 @@ const App: React.FC = () => {
           setPendingCount(pending);
       } catch (error) {
           console.error('Error loading news:', error);
-          addLog('❌ 加载新闻失败');
+          addLog(`❌ 加载新闻失败: ${error instanceof Error ? error.message : String(error)}`);
       } finally {
           setIsLoadingData(false);
       }

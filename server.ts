@@ -10,14 +10,23 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT) || 3001;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
+// Health Check
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    db: 'connected'
+  });
+});
+
 // Database Setup
-const db = new Database('crypto_news.db');
+const db = new Database('crypto_news.db', { verbose: console.log });
 db.pragma('journal_mode = WAL');
 
 // Initialize Schema
@@ -284,14 +293,29 @@ app.put('/api/news/:id', (req, res) => {
   }
 });
 
-// Serve static files in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'dist')));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-  });
-}
+// --- Static Files Serving (关键修复) ---
+const distPath = path.join(__dirname, 'dist');
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// 1. 静态资源托管
+app.use(express.static(distPath));
+
+// 2. SPA 路由回退 (让所有非 API 请求都返回 index.html)
+app.get('*', (req, res, next) => {
+  // 排除掉以 /api 开头的后端接口请求
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  
+  // 检查文件是否存在，避免报错
+  const indexPath = path.join(distPath, 'index.html');
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      console.error('Error sending index.html:', err);
+      res.status(500).send('Error loading frontend. Please run "npm run build" on server.');
+    }
+  });
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on http://0.0.0.0:${PORT}`);
 });
