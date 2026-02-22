@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NewsItem, RewriteTemplate } from '../types';
 import { rewriteNewsForCoinW } from '../services/geminiService';
-import { supabase } from '../lib/supabase';
+import { api } from '../lib/api';
 import { X, Calendar, Globe, Tag, ExternalLink, ThumbsUp, ThumbsDown, Minus, Wand2, ShieldAlert, Check, Copy, RefreshCw, FileText, PenTool } from 'lucide-react';
 
 interface NewsDetailModalProps {
@@ -46,17 +46,16 @@ export const NewsDetailModal: React.FC<NewsDetailModalProps> = ({ item, isOpen, 
           const result = await rewriteNewsForCoinW(item, rewriteTemplate);
           setRewrittenData(result);
           
-          // Save to Supabase
-          const { error } = await supabase
-              .from('news')
-              .update({
+          // Save to API
+          if (item.id) {
+              await api.updateNews(item.id, {
                   rewrittenTitle: result.title,
                   rewrittenContent: result.content,
                   rewriteTemplate: rewriteTemplate
-              })
-              .eq('id', item.id);
-          
-          if (error) throw error;
+              });
+          } else {
+              console.warn("News item has no ID, cannot save rewrite.");
+          }
 
       } catch (e) {
           console.error(e);
