@@ -57,14 +57,24 @@ const TOPIC_FILTERS = [
 
 // Default Sources List
 const DEFAULT_SOURCES = [
-    { name: 'ChainFeeds', url: 'https://www.chainfeeds.xyz/rss' },
-    { name: 'BlockBeats', url: 'https://api.theblockbeats.news/v1/open-api/home-xml' },
+    // --- 中文/华语优质信源 (Chinese Sources) ---
+    { name: 'ChainFeeds (链捕手)', url: 'https://rss.chainfeeds.xyz/rss' },
+    { name: 'BlockBeats (律动)', url: 'https://api.theblockbeats.news/v1/open-api/home-xml' },
     { name: 'PANews', url: 'https://rss.panewslab.com/zh/tvsq/rss' },
+    { name: 'Foresight News', url: 'https://foresightnews.pro/rss' },
+    { name: 'Odaily (星球日报)', url: 'https://www.odaily.news/rss' },
+
+    // --- 英文/国际权威信源 (English/Global Sources) ---
+    { name: 'CoinDesk', url: 'https://www.coindesk.com/arc/outboundfeeds/rss/' },
     { name: 'Cointelegraph', url: 'https://cointelegraph.com/rss' },
-    { name: 'CryptoPotato', url: 'https://cryptopotato.com/rss/' },
+    { name: 'The Block', url: 'https://www.theblock.co/rss.xml' },
+    { name: 'Decrypt', url: 'https://decrypt.co/feed' },
+    { name: 'Blockworks', url: 'https://blockworks.co/feed' },
     { name: 'CryptoSlate', url: 'https://cryptoslate.com/feed/' },
-    { name: 'CryptoBriefing', url: 'https://cryptobriefing.com/feed/' },
-    { name: 'Blockworks', url: 'https://blockworks.co/feed' }
+    { name: 'Bankless', url: 'https://www.bankless.com/rss/feed' },
+    { name: 'The Daily Hodl', url: 'https://dailyhodl.com/feed/' },
+    { name: 'U.Today', url: 'https://u.today/rss' },
+    { name: 'Bitcoin Magazine', url: 'https://bitcoinmagazine.com/.rss/full/' }
 ];
 
 const App: React.FC = () => {
@@ -1196,9 +1206,16 @@ const App: React.FC = () => {
                                                      <Loader2 size={12} className="mr-1 animate-spin"/> 测试中...
                                                  </span>
                                             ) : source.lastFetchStatus === 'ok' ? (
-                                                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-emerald-400 bg-emerald-900/10 border border-emerald-900/20" title="连接正常">
-                                                     <Wifi size={12} className="mr-1" /> 正常
-                                                 </span>
+                                                <div className="flex flex-col items-start">
+                                                     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-emerald-400 bg-emerald-900/10 border border-emerald-900/20" title="连接正常">
+                                                         <Wifi size={12} className="mr-1" /> 正常
+                                                     </span>
+                                                     {source.lastCheckTime && (
+                                                         <span className="text-[10px] text-gray-500 mt-1">
+                                                             {new Date(source.lastCheckTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                         </span>
+                                                     )}
+                                                </div>
                                             ) : source.lastFetchStatus === 'error' ? (
                                                 <div className="flex flex-col items-start">
                                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-red-400 bg-red-900/10 border border-red-900/20 mb-1">
@@ -1207,6 +1224,11 @@ const App: React.FC = () => {
                                                      {source.lastErrorMessage && (
                                                          <span className="text-[10px] text-red-300/70 max-w-[150px] truncate" title={source.lastErrorMessage}>
                                                              {source.lastErrorMessage}
+                                                         </span>
+                                                     )}
+                                                     {source.lastCheckTime && (
+                                                         <span className="text-[10px] text-gray-500 mt-1">
+                                                             {new Date(source.lastCheckTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                                          </span>
                                                      )}
                                                 </div>
