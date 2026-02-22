@@ -115,66 +115,21 @@ const performLocalAnalysis = (text: string): { tickers: string[], category: stri
     };
 };
 
-// Defined Proxy Strategies
-const PROXIES = [
-    {
-        name: 'AllOrigins',
-        getUrl: (target: string) => `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,
-        extract: async (res: Response) => {
-            const data = await res.json();
-            return data.contents;
-        }
-    },
-    {
-        name: 'CodeTabs',
-        getUrl: (target: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`,
-        extract: (res: Response) => res.text()
-    },
-    {
-        name: 'CORSProxy',
-        getUrl: (target: string) => `https://corsproxy.io/?${encodeURIComponent(target)}`,
-        extract: (res: Response) => res.text()
-    },
-    {
-        name: 'ThingProxy',
-        getUrl: (target: string) => `https://thingproxy.freeboard.io/fetch/${target}`,
-        extract: (res: Response) => res.text()
-    }
-];
-
-const fetchWithFallback = async (targetUrl: string): Promise<string> => {
-    const separator = targetUrl.includes('?') ? '&' : '?';
-    const urlWithCache = `${targetUrl}${separator}t=${new Date().getTime()}`;
-    let lastError: any = null;
-
-    for (const proxy of PROXIES) {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 8000); 
-            const response = await fetch(proxy.getUrl(urlWithCache), { signal: controller.signal });
-            clearTimeout(timeoutId);
-
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const content = await proxy.extract(response);
-            if (!content || content.length < 50) throw new Error("Empty response");
-            return content;
-        } catch (error: any) {
-            lastError = error;
-        }
-    }
-    throw new Error(`All proxies failed. Last error: ${lastError?.message || 'Unknown'}`);
-};
-
 export const testRSSConnection = async (url: string): Promise<{ success: boolean; message: string }> => {
     try {
-        const xmlString = await fetchWithFallback(url);
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(xmlString, "text/xml");
-        const parseError = xmlDoc.querySelector('parsererror');
-        if (parseError) return { success: false, message: "Invalid XML" };
+        const response = await fetch('/api/fetch-rss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
 
-        let items = Array.from(xmlDoc.querySelectorAll("item"));
-        if (items.length === 0) items = Array.from(xmlDoc.querySelectorAll("entry"));
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        const items = data.items || [];
 
         return items.length > 0 
             ? { success: true, message: `Found ${items.length} items.` }
@@ -186,54 +141,42 @@ export const testRSSConnection = async (url: string): Promise<{ success: boolean
 
 export const fetchRSS = async (url: string, sourceName: string): Promise<Partial<NewsItem>[]> => {
   try {
-    const xmlString = await fetchWithFallback(url);
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlString, "text/xml");
+    const response = await fetch('/api/fetch-rss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+    });
+
+    if (!response.ok) {
+        throw new Error(`API Error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const items = data.items || [];
     
-    let items = Array.from(xmlDoc.querySelectorAll("item"));
-    if (items.length === 0) items = Array.from(xmlDoc.querySelectorAll("entry"));
-    
-    return items.map(item => {
+    return items.map((item: any) => {
       try {
-          const title = item.querySelector("title")?.textContent?.trim() || "No Title";
-          let link = item.querySelector("link")?.textContent;
-          if (!link) link = item.querySelector("link")?.getAttribute("href") || "";
+          const title = item.title || "No Title";
+          const link = item.link || "";
           
           // Date Parsing
-          const pubDateStr = item.querySelector("pubDate")?.textContent || 
-                             item.querySelector("published")?.textContent || 
-                             item.querySelector("updated")?.textContent || 
-                             item.querySelector("dc\\:date")?.textContent;
           let publishedAt = Date.now();
-          if (pubDateStr) {
-              const parsed = new Date(pubDateStr).getTime();
+          if (item.pubDate) {
+              const parsed = new Date(item.pubDate).getTime();
               if (!isNaN(parsed)) publishedAt = parsed;
           }
 
           // Content Extraction
-          const contentEncoded = item.getElementsByTagName("content:encoded")[0]?.textContent;
-          const description = item.querySelector("description")?.textContent;
-          const contentTag = item.querySelector("content")?.textContent;
-          
-          let fullHtml = "";
-          const candidates = [contentEncoded, description, contentTag].filter(c => c && c.length > 0);
-          if (candidates.length > 0) {
-              fullHtml = candidates.sort((a, b) => (b?.length || 0) - (a?.length || 0))[0] || "";
-          }
+          const fullHtml = item.content || "";
 
           // --- LOCAL INTELLIGENCE (Saving AI Tokens) ---
           
           // 1. Extract Summary directly from Description
-          // Use description specifically for summary if available, otherwise truncate content
-          const rawDescription = description || contentEncoded || contentTag || "";
-          let summary = stripHtml(rawDescription).substring(0, 200);
+          let summary = stripHtml(fullHtml).substring(0, 200);
           if (summary.length > 190) summary += "...";
 
           // 2. Extract Categories from RSS tags
-          const rssCategories: string[] = [];
-          Array.from(item.querySelectorAll("category")).forEach((cat: any) => {
-              if (cat.textContent) rssCategories.push(cat.textContent.trim());
-          });
+          const rssCategories: string[] = item.categories || [];
 
           // 3. Regex Analysis for Coins & Topics
           const analysisText = `${title} ${summary} ${rssCategories.join(' ')}`;
@@ -242,8 +185,7 @@ export const fetchRSS = async (url: string, sourceName: string): Promise<Partial
           // Merge RSS categories into tags
           const finalTags = Array.from(new Set([...localAnalysis.tags, ...rssCategories]));
           
-          // Determine final topic: Use Regex detected topic, fallback to "Other"
-          // If regex detected "Other" but RSS has categories, try to infer, but usually Regex is safer for our specific buckets.
+          // Determine final topic
           const topicCategory = localAnalysis.category;
 
           const uniqueHash = generateHash(link + title);
@@ -251,7 +193,7 @@ export const fetchRSS = async (url: string, sourceName: string): Promise<Partial
           return {
             title: title,
             originalTitle: title,
-            url: link?.trim() || "",
+            url: link.trim(),
             sourceName,
             publishedAt: publishedAt,
             fetchedAt: Date.now(),
@@ -271,7 +213,7 @@ export const fetchRSS = async (url: string, sourceName: string): Promise<Partial
           console.warn("Skipping malformed item", innerError);
           return null;
       }
-    }).filter(item => item !== null) as Partial<NewsItem>[];
+    }).filter((item: any) => item !== null && item.url) as Partial<NewsItem>[];
 
   } catch (error) {
     console.warn(`[RSS] Failed ${sourceName}:`, error);

@@ -209,6 +209,15 @@ const App: React.FC = () => {
 
     try {
       const activeSources = sources.filter(s => s.enabled);
+      
+      if (activeSources.length === 0) {
+          addLog("⚠️ 未检测到有效信源。可能原因：");
+          addLog("1. Vercel 环境变量 (VITE_SUPABASE_URL) 未配置");
+          addLog("2. Supabase 数据库中没有 sources 数据 (请运行 SQL)");
+          addLog("3. 所有信源已被禁用");
+          return;
+      }
+
       let totalNewItems = 0;
 
       // Parallel Fetch requests
@@ -249,11 +258,12 @@ const App: React.FC = () => {
                       totalNewItems += newItems.length; // Approximate
                   } else {
                       console.error("Supabase upsert error", error);
+                      addLog(`❌ ${source.name}: 数据库写入失败。请检查 Vercel 环境变量配置 (VITE_SUPABASE_URL)。`);
                   }
               }
           } catch (e) {
               console.error(`Fetch error for ${source.name}`, e);
-              addLog(` -> ${source.name}: 抓取失败`);
+              addLog(` -> ${source.name}: 抓取失败 (${String(e)})`);
               await supabase.from('sources').update({
                   lastFetchStatus: 'error',
                   lastErrorMessage: String(e),
