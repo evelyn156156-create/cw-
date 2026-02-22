@@ -547,42 +547,131 @@ const App: React.FC = () => {
   };
 
   const handleResetSources = async () => {
-      if (!window.confirm("这将添加默认的加密货币新闻源。如果源已存在，将跳过。\n\n确定要继续吗？")) return;
+      console.log("handleResetSources called");
+      addLog("正在检查默认信源状态...");
       
-      addLog("正在初始化默认信源...");
-      let addedCount = 0;
+      // 1. Identify missing sources
+      const missingSources = DEFAULT_SOURCES.filter(src => !sources.some(s => s.url === src.url));
+      
+      if (missingSources.length === 0) {
+          addLog("✅ 所有默认信源已存在，无需添加。");
+          alert("所有默认信源已存在，无需添加。");
+          return;
+      }
 
-      for (const src of DEFAULT_SOURCES) {
-          // Check if exists by URL to avoid duplicates
-          const exists = sources.some(s => s.url === src.url);
-          if (!exists) {
-              try {
-                  // Test connection before adding
-                  addLog(`正在验证信源: ${src.name}...`);
-                  const testResult = await testRSSConnection(src.url);
+      addLog(`发现 ${missingSources.length} 个缺失的信源，开始自动添加...`);
+
+      let addedCount = 0;
+      let failCount = 0;
+      let schemaErrorDetected = false;
+      let permissionErrorDetected = false;
+
+      // 2. Iterate and add
+      for (const src of missingSources) {
+          try {
+              // Test connection before adding (optional, but good for status)
+              const testResult = await testRSSConnection(src.url);
+              
+              // Attempt 1: Full Insert (with status fields)
+              const { error } = await supabase.from('sources').insert({
+                  name: src.name,
+                  url: src.url,
+                  enabled: true,
+                  type: 'rss',
+                  lastFetchStatus: testResult.success ? 'ok' : 'error',
+                  lastErrorMessage: testResult.success ? null : testResult.message,
+                  lastCheckTime: Date.now()
+              });
+
+              if (error) {
+                  console.error(`Supabase insert error for ${src.name}:`, error);
                   
-                  await supabase.from('sources').insert({
-                      name: src.name,
-                      url: src.url,
-                      enabled: true,
-                      type: 'rss',
-                      lastFetchStatus: testResult.success ? 'ok' : 'error',
-                      lastErrorMessage: testResult.success ? null : testResult.message,
-                      lastCheckTime: Date.now()
-                  });
-                  addedCount++;
-                  if (!testResult.success) {
-                      addLog(`⚠️ ${src.name} 添加成功但连接失败: ${testResult.message}`);
+                  // Check for RLS / Permission Error
+                  if (error.code === '42501') {
+                      permissionErrorDetected = true;
+                      addLog(`❌ 权限不足 (RLS): 无法写入数据库。请检查 Supabase 策略。`);
+                      failCount++; // Stop trying if permission denied
+                      break; 
                   }
-              } catch (e) {
-                  console.error(`Failed to add ${src.name}`, e);
-                  addLog(`❌ 添加 ${src.name} 失败: ${String(e)}`);
+                  
+                  // Attempt 2: Fallback Insert (Minimal fields) if schema is missing columns
+                  if (error.message.includes('column') || error.code === '42703') { // 42703 is undefined_column
+                      schemaErrorDetected = true;
+                      addLog(`⚠️ 数据库缺少状态字段，尝试基础添加...`);
+                      
+                      const { error: fallbackError } = await supabase.from('sources').insert({
+                          name: src.name,
+                          url: src.url,
+                          enabled: true,
+                          type: 'rss'
+                      });
+                      
+                      if (fallbackError) {
+                           if (fallbackError.code === '42501') {
+                               permissionErrorDetected = true;
+                               addLog(`❌ 权限不足 (RLS): 无法写入数据库。`);
+                               break;
+                           }
+                           addLog(`❌ 基础添加 ${src.name} 也失败: ${fallbackError.message}`);
+                           failCount++;
+                      } else {
+                           addedCount++;
+                           addLog(`✅ ${src.name} 基础添加成功 (状态追踪不可用)`);
+                      }
+                  } else {
+                      addLog(`❌ 添加 ${src.name} 数据库写入失败: ${error.message}`);
+                      failCount++;
+                  }
+              } else {
+                  addedCount++;
+                  if (testResult.success) {
+                      addLog(`✅ ${src.name} 添加成功 (连接正常)`);
+                  } else {
+                      addLog(`⚠️ ${src.name} 添加成功 (但连接测试失败: ${testResult.message})`);
+                  }
               }
+
+          } catch (e: any) {
+              console.error(`Exception adding ${src.name}`, e);
+              addLog(`❌ 添加 ${src.name} 发生异常: ${e.message}`);
+              failCount++;
           }
       }
       
-      addLog(`✅ 初始化完成: 新增 ${addedCount} 个信源。`);
-      loadSources();
+      if (permissionErrorDetected) {
+          addLog("🛑 严重错误: 数据库拒绝写入 (RLS Policy)。请运行修复 SQL。");
+          if(confirm("检测到权限错误 (RLS)。是否复制修复 SQL 到剪贴板？\n\n请在 Supabase SQL Editor 中运行此脚本以允许写入操作。")) {
+              const sql = `
+-- Enable RLS but allow all operations for anon (demo mode)
+alter table sources enable row level security;
+drop policy if exists "Allow all operations for everyone" on sources;
+create policy "Allow all operations for everyone" on sources for all using (true) with check (true);
+
+-- Ensure columns exist
+alter table sources add column if not exists "lastFetchStatus" text;
+alter table sources add column if not exists "lastErrorMessage" text;
+alter table sources add column if not exists "lastCheckTime" bigint;
+              `;
+              navigator.clipboard.writeText(sql);
+              alert("SQL 已复制！请在 Supabase SQL Editor 中运行它。");
+          }
+      } else if (schemaErrorDetected) {
+          addLog("⚠️ 检测到数据库架构过时。请运行 SQL 更新数据库以支持状态显示。");
+          if(confirm("数据库缺少必要的字段 (lastFetchStatus 等)。是否复制修复 SQL 到剪贴板？")) {
+              const sql = `
+alter table sources add column if not exists "lastFetchStatus" text;
+alter table sources add column if not exists "lastErrorMessage" text;
+alter table sources add column if not exists "lastCheckTime" bigint;
+              `;
+              navigator.clipboard.writeText(sql);
+              alert("SQL 已复制！请在 Supabase SQL Editor 中运行它。");
+          }
+      }
+
+      addLog(`操作结束: 成功添加 ${addedCount} 个，失败 ${failCount} 个。`);
+      
+      // 3. Refresh list
+      await loadSources();
   };
 
   // Advanced Filtering Logic
@@ -1088,6 +1177,101 @@ const App: React.FC = () => {
                      </div>
                  </div>
 
+                 {/* Recommended Sources Section */}
+                 <div className="bg-crypto-800 border border-crypto-700 rounded-lg p-6">
+                     <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-bold text-white flex items-center">
+                            <Database size={20} className="mr-2 text-emerald-400" /> 推荐优质信源库
+                        </h3>
+                        <div className="flex gap-2">
+                            <button 
+                                onClick={() => {
+                                    const sql = `
+-- Enable RLS but allow all operations for anon (demo mode)
+alter table sources enable row level security;
+drop policy if exists "Allow all operations for everyone" on sources;
+create policy "Allow all operations for everyone" on sources for all using (true) with check (true);
+
+-- Ensure columns exist
+alter table sources add column if not exists "lastFetchStatus" text;
+alter table sources add column if not exists "lastErrorMessage" text;
+alter table sources add column if not exists "lastCheckTime" bigint;
+                                    `;
+                                    navigator.clipboard.writeText(sql);
+                                    alert("修复 SQL 已复制！请在 Supabase SQL Editor 中运行它以解决权限问题。");
+                                }}
+                                className="px-3 py-2 bg-crypto-700 hover:bg-crypto-600 text-gray-300 border border-crypto-600 rounded-lg text-xs font-bold transition-colors flex items-center"
+                                title="如果添加失败，请点击此按钮复制修复脚本"
+                            >
+                                <Settings size={14} className="mr-1"/> 修复数据库权限
+                            </button>
+                            <button 
+                                onClick={handleResetSources}
+                                className="px-4 py-2 bg-emerald-900/30 hover:bg-emerald-900/50 text-emerald-400 border border-emerald-900 rounded-lg text-xs font-bold transition-colors flex items-center"
+                            >
+                                <Plus size={14} className="mr-1"/> 一键添加所有未添加项
+                            </button>
+                        </div>
+                     </div>
+                     
+                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                         {DEFAULT_SOURCES.map((defSource, idx) => {
+                             const existing = sources.find(s => s.url === defSource.url);
+                             const isAdded = !!existing;
+                             
+                             return (
+                                 <div key={idx} className={`p-3 rounded-lg border flex justify-between items-center ${isAdded ? 'bg-crypto-900/50 border-crypto-700' : 'bg-crypto-800 border-crypto-600 hover:border-crypto-500'}`}>
+                                     <div className="overflow-hidden mr-2">
+                                         <div className="font-bold text-sm text-white truncate" title={defSource.name}>{defSource.name}</div>
+                                         <div className="text-xs text-gray-500 truncate" title={defSource.url}>{defSource.url}</div>
+                                     </div>
+                                     
+                                     {isAdded ? (
+                                         <div className="flex flex-col items-end flex-shrink-0">
+                                             <span className="text-[10px] bg-crypto-700 text-gray-300 px-1.5 py-0.5 rounded mb-1">已添加</span>
+                                             {existing?.lastFetchStatus === 'ok' && <span className="text-[10px] text-emerald-400 flex items-center"><Wifi size={8} className="mr-1"/>正常</span>}
+                                             {existing?.lastFetchStatus === 'error' && <span className="text-[10px] text-red-400 flex items-center"><WifiOff size={8} className="mr-1"/>异常</span>}
+                                         </div>
+                                     ) : (
+                                         <button
+                                             onClick={async () => {
+                                                 if(window.confirm(`确定添加 ${defSource.name} 吗?`)) {
+                                                     setNewSource({ name: defSource.name, url: defSource.url });
+                                                     // We can't easily call handleAddSource directly because it uses state. 
+                                                     // So we just simulate the add logic here or set state and let user click add.
+                                                     // Better: Direct insert logic.
+                                                     try {
+                                                         addLog(`正在添加: ${defSource.name}...`);
+                                                         const testResult = await testRSSConnection(defSource.url);
+                                                         await supabase.from('sources').insert({
+                                                             name: defSource.name,
+                                                             url: defSource.url,
+                                                             enabled: true,
+                                                             type: 'rss',
+                                                             lastFetchStatus: testResult.success ? 'ok' : 'error',
+                                                             lastErrorMessage: testResult.success ? null : testResult.message,
+                                                             lastCheckTime: Date.now()
+                                                         });
+                                                         addLog(`✅ ${defSource.name} 添加成功`);
+                                                         loadSources();
+                                                     } catch(e) {
+                                                         console.error(e);
+                                                         addLog(`❌ 添加失败: ${String(e)}`);
+                                                     }
+                                                 }
+                                             }}
+                                             className="p-1.5 bg-crypto-700 hover:bg-crypto-600 text-white rounded transition-colors"
+                                             title="添加此源"
+                                         >
+                                             <Plus size={16} />
+                                         </button>
+                                     )}
+                                 </div>
+                             );
+                         })}
+                     </div>
+                 </div>
+
                  <div className="flex gap-4">
                     <div className="flex-1 bg-crypto-800 border border-crypto-700 rounded-lg p-6">
                         <h3 className="text-lg font-bold text-white mb-4 flex items-center">
@@ -1139,15 +1323,6 @@ const App: React.FC = () => {
                     >
                         <RefreshCw size={24} className="mb-1 text-yellow-400"/>
                         <span className="text-xs font-bold">重试失败</span>
-                    </button>
-                    
-                    <button 
-                        onClick={handleResetSources}
-                        className="bg-crypto-800 border border-crypto-700 hover:bg-crypto-700 text-gray-300 rounded-lg px-6 flex flex-col items-center justify-center transition-all"
-                        title="一键添加默认源"
-                    >
-                        <Database size={24} className="mb-1 text-emerald-400"/>
-                        <span className="text-xs font-bold">初始化信源</span>
                     </button>
                  </div>
 
