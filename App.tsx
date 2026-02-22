@@ -522,6 +522,20 @@ const App: React.FC = () => {
       addLog("批量测试完成。");
   };
 
+  const handleRetryFailedSources = async () => {
+      const failedSources = sources.filter(s => s.lastFetchStatus === 'error');
+      if (failedSources.length === 0) {
+          alert("当前没有标记为失败的信源。");
+          return;
+      }
+      
+      addLog(`开始重试 ${failedSources.length} 个失败信源...`);
+      for (const source of failedSources) {
+          await handleTestSource(source);
+      }
+      addLog("重试完成。");
+  };
+
   const handleResetSources = async () => {
       if (!window.confirm("这将添加默认的加密货币新闻源。如果源已存在，将跳过。\n\n确定要继续吗？")) return;
       
@@ -1107,6 +1121,15 @@ const App: React.FC = () => {
                         <Wifi size={24} className="mb-1 text-crypto-400"/>
                         <span className="text-xs font-bold">批量体检</span>
                     </button>
+
+                    <button 
+                        onClick={handleRetryFailedSources}
+                        className="bg-crypto-800 border border-crypto-700 hover:bg-crypto-700 text-gray-300 rounded-lg px-6 flex flex-col items-center justify-center transition-all"
+                        title="仅重试失败的连接"
+                    >
+                        <RefreshCw size={24} className="mb-1 text-yellow-400"/>
+                        <span className="text-xs font-bold">重试失败</span>
+                    </button>
                     
                     <button 
                         onClick={handleResetSources}
@@ -1119,84 +1142,107 @@ const App: React.FC = () => {
                  </div>
 
                  <div className="bg-crypto-800 border border-crypto-700 rounded-lg overflow-hidden">
-                    <table className="w-full text-left">
-                        <thead className="bg-crypto-700/50 text-gray-400 text-xs uppercase">
-                            <tr>
-                                <th className="px-6 py-4">来源名称</th>
-                                <th className="px-6 py-4">RSS 地址</th>
-                                <th className="px-6 py-4">运行状态</th>
-                                <th className="px-6 py-4">健康度 (最近检测)</th>
-                                <th className="px-6 py-4 text-right">操作</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-crypto-700">
-                            {sources?.map(source => (
-                                <tr key={source.id} className="hover:bg-crypto-700/30">
-                                    <td className="px-6 py-4 font-medium text-white">{source.name}</td>
-                                    <td className="px-6 py-4 text-gray-400 text-sm truncate max-w-xs">{source.url}</td>
-                                    <td className="px-6 py-4">
-                                        {source.enabled ? (
-                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-900/30 text-emerald-400 border border-emerald-900">
-                                                <CheckCircle2 size={12} className="mr-1" /> 运行中
-                                            </span>
-                                        ) : (
-                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-700 text-gray-400 border border-gray-600">
-                                                <Ban size={12} className="mr-1" /> 已禁用
-                                            </span>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        {testingSourceId === source.id ? (
-                                             <span className="inline-flex items-center text-xs text-crypto-400 animate-pulse">
-                                                 <Loader2 size={12} className="mr-1 animate-spin"/> 测试中...
-                                             </span>
-                                        ) : source.lastFetchStatus === 'ok' ? (
-                                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-emerald-400 bg-emerald-900/10 border border-emerald-900/20" title="连接正常">
-                                                 <Wifi size={12} className="mr-1" /> 正常
-                                             </span>
-                                        ) : source.lastFetchStatus === 'error' ? (
-                                            <div className="group relative inline-block">
-                                                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-red-400 bg-red-900/10 border border-red-900/20 cursor-help">
-                                                     <WifiOff size={12} className="mr-1" /> 连接失败
-                                                 </span>
-                                                 {source.lastErrorMessage && (
-                                                     <div className="absolute bottom-full left-0 mb-2 w-48 p-2 bg-black border border-crypto-600 rounded text-xs text-gray-300 hidden group-hover:block z-50">
-                                                         {source.lastErrorMessage}
-                                                     </div>
-                                                 )}
-                                            </div>
-                                        ) : (
-                                            <span className="text-gray-600 text-xs">-</span>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4 text-right flex justify-end gap-2">
-                                        <button 
-                                            onClick={() => handleTestSource(source)}
-                                            className="p-2 text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors"
-                                            title="测试连接"
-                                        >
-                                            <Activity size={18} />
-                                        </button>
-                                        <button 
-                                            onClick={() => handleToggleSource(source)}
-                                            className={`p-2 rounded-lg transition-colors ${source.enabled ? 'text-yellow-400 hover:bg-yellow-400/10' : 'text-emerald-400 hover:bg-emerald-400/10'}`}
-                                            title={source.enabled ? "禁用" : "启用"}
-                                        >
-                                            <Power size={18} />
-                                        </button>
-                                        <button 
-                                            onClick={() => handleDeleteSource(source.id)}
-                                            className="p-2 text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
-                                            title="删除"
-                                        >
-                                            <Trash2 size={18} />
-                                        </button>
-                                    </td>
+                    {sources.length === 0 ? (
+                        <div className="p-10 text-center flex flex-col items-center justify-center">
+                            <div className="bg-crypto-700/50 p-4 rounded-full mb-4">
+                                <Database size={48} className="text-crypto-400" />
+                            </div>
+                            <h3 className="text-xl font-bold text-white mb-2">暂无信源</h3>
+                            <p className="text-gray-400 max-w-md mb-6">
+                                数据库中还没有配置任何新闻源。您可以手动添加，或者使用我们预设的优质加密货币新闻源列表进行初始化。
+                            </p>
+                            <button 
+                                onClick={handleResetSources}
+                                className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-all flex items-center shadow-lg shadow-emerald-900/20"
+                            >
+                                <Database size={20} className="mr-2"/>
+                                一键导入默认信源 ({DEFAULT_SOURCES.length}个)
+                            </button>
+                        </div>
+                    ) : (
+                        <table className="w-full text-left">
+                            <thead className="bg-crypto-700/50 text-gray-400 text-xs uppercase">
+                                <tr>
+                                    <th className="px-6 py-4">来源名称</th>
+                                    <th className="px-6 py-4">RSS 地址</th>
+                                    <th className="px-6 py-4">运行状态</th>
+                                    <th className="px-6 py-4">健康度 (最近检测)</th>
+                                    <th className="px-6 py-4 text-right">操作</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                            </thead>
+                            <tbody className="divide-y divide-crypto-700">
+                                {sources?.map(source => (
+                                    <tr key={source.id} className="hover:bg-crypto-700/30">
+                                        <td className="px-6 py-4 font-medium text-white">
+                                            {source.name}
+                                        </td>
+                                        <td className="px-6 py-4 text-gray-400 text-sm">
+                                            <div className="truncate max-w-xs" title={source.url}>{source.url}</div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            {source.enabled ? (
+                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-900/30 text-emerald-400 border border-emerald-900">
+                                                    <CheckCircle2 size={12} className="mr-1" /> 运行中
+                                                </span>
+                                            ) : (
+                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-700 text-gray-400 border border-gray-600">
+                                                    <Ban size={12} className="mr-1" /> 已禁用
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            {testingSourceId === source.id ? (
+                                                 <span className="inline-flex items-center text-xs text-crypto-400 animate-pulse">
+                                                     <Loader2 size={12} className="mr-1 animate-spin"/> 测试中...
+                                                 </span>
+                                            ) : source.lastFetchStatus === 'ok' ? (
+                                                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-emerald-400 bg-emerald-900/10 border border-emerald-900/20" title="连接正常">
+                                                     <Wifi size={12} className="mr-1" /> 正常
+                                                 </span>
+                                            ) : source.lastFetchStatus === 'error' ? (
+                                                <div className="flex flex-col items-start">
+                                                     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-red-400 bg-red-900/10 border border-red-900/20 mb-1">
+                                                         <WifiOff size={12} className="mr-1" /> 连接失败
+                                                     </span>
+                                                     {source.lastErrorMessage && (
+                                                         <span className="text-[10px] text-red-300/70 max-w-[150px] truncate" title={source.lastErrorMessage}>
+                                                             {source.lastErrorMessage}
+                                                         </span>
+                                                     )}
+                                                </div>
+                                            ) : (
+                                                <span className="text-gray-500 text-xs italic">未检测</span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4 text-right flex justify-end gap-2">
+                                            <button 
+                                                onClick={() => handleTestSource(source)}
+                                                className="p-2 text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors"
+                                                title="测试连接"
+                                            >
+                                                <Activity size={18} />
+                                            </button>
+                                            <button 
+                                                onClick={() => handleToggleSource(source)}
+                                                className={`p-2 rounded-lg transition-colors ${source.enabled ? 'text-yellow-400 hover:bg-yellow-400/10' : 'text-emerald-400 hover:bg-emerald-400/10'}`}
+                                                title={source.enabled ? "禁用" : "启用"}
+                                            >
+                                                <Power size={18} />
+                                            </button>
+                                            <button 
+                                                onClick={() => handleDeleteSource(source.id)}
+                                                className="p-2 text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                                                title="删除"
+                                            >
+                                                <Trash2 size={18} />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                 </div>
             </div>
         )}
 
