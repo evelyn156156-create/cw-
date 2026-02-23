@@ -9,7 +9,7 @@
 ## 第二步：进入项目目录
 
 ```bash
-cd /root/crypto-intel-ai
+cd /root/cw-
 ```
 *(如果您上传到了其他目录，请进入相应目录)*
 
@@ -19,8 +19,8 @@ cd /root/crypto-intel-ai
 
 1. **停止当前服务**
    ```bash
-   pm2 stop news-app
-   pm2 delete news-app
+   pm2 stop my-ai-bot
+   pm2 delete my-ai-bot
    ```
 
 2. **安装依赖**
@@ -44,7 +44,7 @@ cd /root/crypto-intel-ai
 
 ```bash
 # 启动服务
-pm2 start npm --name "news-app" -- start
+pm2 start npm --name "my-ai-bot" -- start
 
 # 保存状态
 pm2 save
@@ -54,7 +54,7 @@ pm2 save
 
 1. **查看日志** (检查是否有报错)
    ```bash
-   pm2 logs news-app --lines 50
+   pm2 logs my-ai-bot --lines 50
    ```
    *您应该能看到 "Server running on http://0.0.0.0:3001" 和 "✅ Serving static files from..." 的字样。*
 

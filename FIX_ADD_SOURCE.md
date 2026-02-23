@@ -8,7 +8,7 @@
 
 ### 1. 进入项目目录
 ```bash
-cd /root/crypto-intel-ai
+cd /root/cw-
 ```
 
 ### 2. 获取最新代码 (如果您使用 Git)
@@ -27,8 +27,8 @@ bash redeploy.sh
 或者手动执行：
 ```bash
 # 停止旧服务
-pm2 stop news-app
-pm2 delete news-app
+pm2 stop my-ai-bot
+pm2 delete my-ai-bot
 
 # 重新安装依赖 (确保 rss-parser 配置生效)
 npm install
@@ -37,7 +37,7 @@ npm install
 npm run build
 
 # 启动服务
-pm2 start npm --name "news-app" -- start
+pm2 start npm --name "my-ai-bot" -- start
 pm2 save
 ```
 
