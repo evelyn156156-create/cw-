@@ -72,7 +72,12 @@ db.exec(`
 `);
 
 // RSS Parser
-const parser = new Parser();
+const parser = new Parser({
+  timeout: 5000, // 5 seconds timeout
+  headers: {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+  }
+});
 
 // --- API Endpoints ---
 
@@ -95,21 +100,27 @@ app.post('/api/sources', async (req, res) => {
   const { name, url, enabled = true, type = 'rss' } = req.body;
   const id = crypto.randomUUID();
   
-  try {
-    // Test connection first
-    try {
-      await parser.parseURL(url);
-    } catch (e: any) {
-      return res.status(400).json({ error: `RSS 连接失败: ${e.message}` });
-    }
+  let initialStatus = 'pending';
+  let initialError = null;
 
+  // Try to fetch immediately, but don't block addition if it fails
+  try {
+    await parser.parseURL(url);
+    initialStatus = 'ok';
+  } catch (e: any) {
+    console.warn(`Warning: Could not fetch RSS for ${url} during addition: ${e.message}`);
+    initialStatus = 'error';
+    initialError = e.message;
+  }
+
+  try {
     const stmt = db.prepare(`
-      INSERT INTO sources (id, name, url, enabled, type, lastFetchStatus, lastCheckTime)
-      VALUES (?, ?, ?, ?, ?, 'ok', ?)
+      INSERT INTO sources (id, name, url, enabled, type, lastFetchStatus, lastErrorMessage, lastCheckTime)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    stmt.run(id, name, url, enabled ? 1 : 0, type, Date.now());
+    stmt.run(id, name, url, enabled ? 1 : 0, type, initialStatus, initialError, Date.now());
     
-    res.json({ success: true, id });
+    res.json({ success: true, id, status: initialStatus, message: initialError ? 'Source added but initial fetch failed' : 'Source added successfully' });
   } catch (err: any) {
     if (err.message.includes('UNIQUE constraint failed')) {
       return res.status(409).json({ error: '该 RSS 源已存在' });
@@ -300,7 +311,8 @@ const distPath = path.join(__dirname, 'dist');
 app.use(express.static(distPath));
 
 // 2. SPA 路由回退 (让所有非 API 请求都返回 index.html)
-app.get('*', (req, res, next) => {
+// 注意: Express 5 中必须使用 '(.*)' 而不是 '*'
+app.get('(.*)', (req, res, next) => {
   // 排除掉以 /api 开头的后端接口请求
   if (req.path.startsWith('/api')) {
     return next();

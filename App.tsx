@@ -190,8 +190,12 @@ const App: React.FC = () => {
       
       addLog(`正在添加信源: ${newSource.name}...`);
       try {
-          await api.addSource(newSource);
-          addLog(`✅ 添加成功: ${newSource.name}`);
+          const res = await api.addSource(newSource);
+          if (res.status === 'error') {
+              addLog(`⚠️ 添加成功但连接失败: ${newSource.name} (请稍后测试连接)`);
+          } else {
+              addLog(`✅ 添加成功: ${newSource.name}`);
+          }
           setNewSource({ name: '', url: '' });
           loadSources();
       } catch (error: any) {
@@ -281,9 +285,13 @@ const App: React.FC = () => {
 
       for (const src of missingSources) {
           try {
-              await api.addSource(src);
+              const res = await api.addSource(src);
               addedCount++;
-              addLog(`✅ ${src.name} 添加成功`);
+              if (res.status === 'error') {
+                  addLog(`⚠️ ${src.name} 添加成功但连接失败`);
+              } else {
+                  addLog(`✅ ${src.name} 添加成功`);
+              }
           } catch (e: any) {
               console.error(`Exception adding ${src.name}`, e);
               addLog(`❌ 添加 ${src.name} 失败: ${e.message}`);

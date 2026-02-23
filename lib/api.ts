@@ -6,10 +6,16 @@ const handleResponse = async (res: Response, errorMsg: string) => {
   if (!res.ok) {
     let details = '';
     try {
-      const data = await res.json();
-      details = data.error || data.message || JSON.stringify(data);
+      // Read text once to avoid "body stream already read" error
+      const text = await res.text();
+      try {
+        const data = JSON.parse(text);
+        details = data.error || data.message || JSON.stringify(data);
+      } catch {
+        details = text;
+      }
     } catch (e) {
-      details = await res.text();
+      details = 'Unknown error';
     }
     throw new Error(`${errorMsg} (${res.status}): ${details}`);
   }

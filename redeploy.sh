@@ -12,6 +12,8 @@ cd /root/crypto-intel-ai || { echo "❌ 找不到目录 /root/crypto-intel-ai"; 
 echo "🛑 停止旧服务..."
 pm2 stop news-app 2>/dev/null
 pm2 delete news-app 2>/dev/null
+pm2 stop my-ai-bot 2>/dev/null
+pm2 delete my-ai-bot 2>/dev/null
 
 # 3. 重新安装依赖 (防止依赖缺失)
 echo "📦 检查依赖..."
