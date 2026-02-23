@@ -254,20 +254,97 @@ app.post('/api/fetch-rss', async (req, res) => {
 });
 
 app.post('/api/analyze', async (req, res) => {
-  // This endpoint would trigger Gemini analysis
-  // For now, we'll just mark pending items as processed to simulate
   try {
+    // 1. Check API Key
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ 
+        error: '未配置 GEMINI_API_KEY。请在服务器环境变量中设置该密钥。' 
+      });
+    }
+
+    // 2. Initialize Gemini
+    const ai = new GoogleGenAI({ apiKey });
+
+    // 3. Fetch Pending Items
     const pending = db.prepare("SELECT * FROM news WHERE status = 'PENDING' LIMIT 5").all();
     
-    // In a real implementation, you'd call Gemini here
-    // For this demo, we'll just update status
-    const updateStmt = db.prepare("UPDATE news SET status = 'COMPLETED' WHERE id = ?");
-    
+    if (pending.length === 0) {
+      return res.json({ success: true, processed: 0, message: 'No pending items' });
+    }
+
+    const updateStmt = db.prepare(`
+      UPDATE news 
+      SET status = 'COMPLETED', summary = ?, sentiment = ?, tags = ?, isCryptoRelated = ?
+      WHERE id = ?
+    `);
+
+    let processedCount = 0;
+
     for (const item of pending as any[]) {
-      updateStmt.run(item.id);
+      try {
+        // 4. Call Gemini
+        const prompt = `
+          作为加密货币分析师，请分析以下新闻。
+          标题: ${item.title}
+          内容: ${item.content || item.originalTitle}
+          
+          请返回纯 JSON 格式（不要包含 Markdown 代码块），包含以下字段：
+          - summary: 中文摘要（50字以内）
+          - sentiment: 情感倾向 (POSITIVE, NEGATIVE, NEUTRAL)
+          - tags: 3-5个相关标签的数组
+          - isCryptoRelated: 布尔值，是否与加密货币/区块链直接相关
+        `;
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json'
+          }
+        });
+
+        const text = response.text || '{}';
+        let analysis: any = {};
+        
+        try {
+          analysis = JSON.parse(text);
+        } catch (e) {
+          console.error('JSON Parse Error:', text);
+          // Fallback
+          analysis = { 
+            summary: '解析失败', 
+            sentiment: 'NEUTRAL', 
+            tags: [], 
+            isCryptoRelated: true 
+          };
+        }
+
+        // 5. Update DB
+        const updateStmt = db.prepare(`
+          UPDATE news 
+          SET status = 'COMPLETED', summary = ?, sentiment = ?, tags = ?, isCryptoRelated = ?
+          WHERE id = ?
+        `);
+
+        updateStmt.run(
+          analysis.summary || '',
+          analysis.sentiment || 'NEUTRAL',
+          JSON.stringify(analysis.tags || []),
+          analysis.isCryptoRelated ? 1 : 0,
+          item.id
+        );
+        
+        processedCount++;
+      } catch (err: any) {
+        console.error(`Error analyzing item ${item.id}:`, err);
+        // Mark as error or skip? For now, skip updating status so it retries later
+        // Or maybe mark as FAILED to avoid infinite loops
+        db.prepare("UPDATE news SET status = 'FAILED', lastErrorMessage = ? WHERE id = ?").run(err.message, item.id);
+      }
     }
     
-    res.json({ success: true, processed: pending.length });
+    res.json({ success: true, processed: processedCount });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -282,6 +359,84 @@ app.post('/api/prune', (req, res) => {
     const info = db.prepare('DELETE FROM news WHERE publishedAt < ?').run(cutoff);
     res.json({ deleted: info.changes });
   } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/rewrite/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: '未配置 GEMINI_API_KEY' });
+    }
+
+    const item = db.prepare('SELECT * FROM news WHERE id = ?').get(id) as any;
+    if (!item) {
+      return res.status(404).json({ error: 'News item not found' });
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+    
+    const prompt = `
+      请作为一位专业的加密货币领域编辑，对这篇新闻进行深度改写和总结。
+      
+      原文标题: ${item.title}
+      原文内容: ${item.content || item.originalTitle}
+      
+      请完成以下任务并返回 JSON 格式：
+      1. rewrittenTitle: 重写标题，使其更具吸引力、简练且包含核心信息（中文）。
+      2. summary: 生成一段简短的中文摘要（100字以内），提炼核心要点。
+      3. rewrittenContent: 重写正文（中文）。要求：
+         - 逻辑清晰，分段落。
+         - 适合大众阅读，去除晦涩的术语或进行解释。
+         - 保留所有核心事实和数据。
+         - 语气专业客观。
+         - 使用 Markdown 格式（例如使用 **加粗** 强调重点）。
+
+      返回格式示例:
+      {
+        "rewrittenTitle": "...",
+        "summary": "...",
+        "rewrittenContent": "..."
+      }
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json'
+      }
+    });
+
+    const text = response.text || '{}';
+    let result: any = {};
+    
+    try {
+      result = JSON.parse(text);
+    } catch (e) {
+      console.error('JSON Parse Error:', text);
+      return res.status(500).json({ error: 'AI 响应解析失败' });
+    }
+
+    const stmt = db.prepare(`
+      UPDATE news 
+      SET rewrittenTitle = ?, summary = ?, rewrittenContent = ?, status = 'COMPLETED'
+      WHERE id = ?
+    `);
+    
+    stmt.run(
+      result.rewrittenTitle || item.title,
+      result.summary || '',
+      result.rewrittenContent || '',
+      id
+    );
+
+    res.json({ success: true, data: result });
+
+  } catch (err: any) {
+    console.error('Rewrite error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -316,6 +471,11 @@ app.get(/.*/, (req, res, next) => {
   // 排除掉以 /api 开头的后端接口请求
   if (req.path.startsWith('/api')) {
     return next();
+  }
+
+  // 排除常见的静态资源请求，避免返回 HTML 导致 "Unexpected token <" 错误
+  if (/\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$/.test(req.path)) {
+    return res.status(404).send('Resource not found');
   }
   
   // 检查文件是否存在，避免报错

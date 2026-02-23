@@ -7,9 +7,10 @@ interface NewsCardProps {
   onClick?: (item: NewsItem) => void;
   onAnalyze?: (item: NewsItem) => void;
   onTagClick?: (tag: string, type: 'coin' | 'topic') => void;
+  onDetailClick?: (item: NewsItem) => void;
 }
 
-export const NewsCard: React.FC<NewsCardProps> = ({ item, onClick, onAnalyze, onTagClick }) => {
+export const NewsCard: React.FC<NewsCardProps> = ({ item, onClick, onAnalyze, onTagClick, onDetailClick }) => {
   const formatDate = (ts: number) => {
     return new Intl.DateTimeFormat('en-US', {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -179,7 +180,7 @@ export const NewsCard: React.FC<NewsCardProps> = ({ item, onClick, onAnalyze, on
             )}
             
             <button 
-                onClick={(e) => { e.stopPropagation(); onClick && onClick(item); }}
+                onClick={(e) => { e.stopPropagation(); onDetailClick && onDetailClick(item); }}
                 className="text-xs font-bold text-gray-400 hover:text-white flex items-center px-2 py-1 rounded hover:bg-crypto-700 transition-colors"
             >
                 详情 <ExternalLink size={14} className="ml-1" />

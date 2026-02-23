@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { NewsCard } from './components/NewsCard';
 import { StatsCard } from './components/StatsCard';
+import { NewsDetailModal } from './components/NewsDetailModal';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ... (Keep existing filters and constants) ...
@@ -496,8 +497,9 @@ const App: React.FC = () => {
                                     key={item.id || item.uniqueHash} 
                                     item={item} 
                                     onClick={(item) => setSelectedNews(item)}
-                                    onAnalyze={() => {}} // Single analysis not implemented in API yet
-                                    onTagClick={() => {}}
+                                    onDetailClick={(item) => setSelectedNews(item)}
+                                    onAnalyze={() => {}} 
+                                    onTagClick={(tag) => setSearchQuery(tag)}
                                 />
                             ))}
                         </div>
@@ -509,6 +511,15 @@ const App: React.FC = () => {
                         </div>
                     )}
                 </div>
+            )}
+
+            {/* News Detail Modal */}
+            {selectedNews && (
+                <NewsDetailModal 
+                    news={selectedNews} 
+                    onClose={() => setSelectedNews(null)} 
+                    onUpdate={loadNews}
+                />
             )}
 
             {activeTab === 'sources' && (

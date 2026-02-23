@@ -92,6 +92,13 @@ export const api = {
     return handleResponse(res, 'Failed to prune news');
   },
 
+  rewriteNews: async (id: string | number) => {
+    const res = await fetch(`${API_BASE}/rewrite/${id}`, {
+      method: 'POST',
+    });
+    return handleResponse(res, 'Failed to rewrite news');
+  },
+
   updateNews: async (id: string | number, data: any) => {
     const res = await fetch(`${API_BASE}/news/${id}`, {
       method: 'PUT',
