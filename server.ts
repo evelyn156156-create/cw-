@@ -311,8 +311,8 @@ const distPath = path.join(__dirname, 'dist');
 app.use(express.static(distPath));
 
 // 2. SPA 路由回退 (让所有非 API 请求都返回 index.html)
-// 注意: Express 5 中必须使用 '(.*)' 而不是 '*'
-app.get('(.*)', (req, res, next) => {
+// 注意: Express 5 中使用正则 /.*/ 匹配所有路径
+app.get(/.*/, (req, res, next) => {
   // 排除掉以 /api 开头的后端接口请求
   if (req.path.startsWith('/api')) {
     return next();
